@@ -1,0 +1,240 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>Fintelligence — Earnings Intelligence</title>
+  <style>
+    * { box-sizing: border-box; margin: 0; padding: 0; }
+    body { font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif; background: #f5f6fa; color: #222; }
+    header { background: #1a1f36; color: #fff; padding: 1rem 2rem; }
+    header h1 { font-size: 1.4rem; font-weight: 600; }
+    header p { font-size: 0.85rem; opacity: 0.7; margin-top: 0.2rem; }
+    main { max-width: 1100px; margin: 2rem auto; padding: 0 1rem; }
+    section { background: #fff; border-radius: 8px; padding: 1.5rem; margin-bottom: 1.5rem; box-shadow: 0 1px 4px rgba(0,0,0,0.08); }
+    h2 { font-size: 1rem; font-weight: 600; margin-bottom: 1rem; color: #1a1f36; }
+    label { display: block; font-size: 0.85rem; font-weight: 500; margin-bottom: 0.3rem; }
+    textarea, input[type="text"] { width: 100%; border: 1px solid #d1d5db; border-radius: 6px; padding: 0.6rem 0.8rem; font-size: 0.9rem; }
+    textarea { resize: vertical; min-height: 80px; }
+    .row { display: flex; gap: 1rem; margin-top: 0.8rem; }
+    .row > div { flex: 1; }
+    button { background: #3b5bdb; color: #fff; border: none; border-radius: 6px; padding: 0.6rem 1.4rem; font-size: 0.9rem; cursor: pointer; margin-top: 1rem; }
+    button:hover { background: #2f4cc4; }
+    button:disabled { opacity: 0.5; cursor: not-allowed; }
+    #truncated-banner { background: #fff3cd; border: 1px solid #ffc107; border-radius: 6px; padding: 0.6rem 1rem; margin-bottom: 1rem; font-size: 0.85rem; display: none; }
+    table { width: 100%; border-collapse: collapse; font-size: 0.85rem; }
+    th { background: #f3f4f6; text-align: left; padding: 0.6rem 0.8rem; font-weight: 600; border-bottom: 2px solid #e5e7eb; }
+    td { padding: 0.6rem 0.8rem; border-bottom: 1px solid #f0f0f0; }
+    tr:hover td { background: #fafafa; }
+    a { color: #3b5bdb; text-decoration: none; }
+    a:hover { text-decoration: underline; }
+    .meta { font-size: 0.78rem; color: #6b7280; margin-top: 0.5rem; }
+    #status-msg { font-size: 0.85rem; color: #6b7280; margin-top: 0.5rem; }
+    #ingest-result { font-size: 0.85rem; margin-top: 0.8rem; }
+    #ingest-result pre { background: #f3f4f6; padding: 0.8rem; border-radius: 6px; overflow-x: auto; }
+    .badge-cache { background: #d1fae5; color: #065f46; padding: 0.15rem 0.5rem; border-radius: 4px; font-size: 0.75rem; font-weight: 600; }
+    .badge-live { background: #dbeafe; color: #1e40af; padding: 0.15rem 0.5rem; border-radius: 4px; font-size: 0.75rem; font-weight: 600; }
+  </style>
+</head>
+<body>
+  <header>
+    <h1>Fintelligence</h1>
+    <p>Earnings Intelligence — powered by SEC EDGAR filings</p>
+  </header>
+
+  <main>
+    <!-- Query Section -->
+    <section>
+      <h2>Query Earnings Filings</h2>
+      <label for="query-text">Question</label>
+      <textarea id="query-text" placeholder="Which semiconductor companies are guiding down gross margins?"></textarea>
+      <div class="row">
+        <div>
+          <label for="fiscal-period">Fiscal Period (optional)</label>
+          <input type="text" id="fiscal-period" placeholder="e.g. Q3 2024" />
+        </div>
+        <div>
+          <label for="ticker-filter">Tickers (optional, comma-separated)</label>
+          <input type="text" id="ticker-filter" placeholder="e.g. NVDA, AMD, INTC" />
+        </div>
+      </div>
+      <button id="query-btn" onclick="submitQuery()">Submit Query</button>
+      <div id="status-msg"></div>
+    </section>
+
+    <!-- Results Section -->
+    <section id="results-section" style="display:none">
+      <h2>Results</h2>
+      <div id="truncated-banner">⚠ Results were truncated to 20 entries.</div>
+      <div id="results-meta" class="meta"></div>
+      <div style="overflow-x:auto; margin-top: 0.8rem;">
+        <table>
+          <thead>
+            <tr>
+              <th>Company</th>
+              <th>Ticker</th>
+              <th>Metric</th>
+              <th>Prior</th>
+              <th>Current</th>
+              <th>Change</th>
+              <th>Unit</th>
+              <th>Citation</th>
+            </tr>
+          </thead>
+          <tbody id="results-tbody"></tbody>
+        </table>
+      </div>
+      <div id="explanation" style="margin-top:0.8rem; font-size:0.85rem; color:#6b7280;"></div>
+    </section>
+
+    <!-- Ingestion Section -->
+    <section>
+      <h2>Ingest Filings</h2>
+      <div class="row">
+        <div>
+          <label for="ingest-ticker">Ticker</label>
+          <input type="text" id="ingest-ticker" placeholder="e.g. NVDA" />
+        </div>
+        <div>
+          <label for="ingest-max">Max Filings</label>
+          <input type="text" id="ingest-max" placeholder="4" />
+        </div>
+      </div>
+      <button id="ingest-btn" onclick="triggerIngest()">Ingest</button>
+      <div id="ingest-result"></div>
+    </section>
+  </main>
+
+  <script>
+    async function submitQuery() {
+      const queryText = document.getElementById('query-text').value.trim();
+      if (!queryText) return;
+
+      const btn = document.getElementById('query-btn');
+      const statusMsg = document.getElementById('status-msg');
+      btn.disabled = true;
+      statusMsg.textContent = 'Running query…';
+
+      const fiscalPeriod = document.getElementById('fiscal-period').value.trim() || null;
+      const tickerRaw = document.getElementById('ticker-filter').value.trim();
+      const tickerFilter = tickerRaw ? tickerRaw.split(',').map(t => t.trim().toUpperCase()).filter(Boolean) : null;
+
+      const body = { query_text: queryText };
+      if (fiscalPeriod) body.fiscal_period_filter = fiscalPeriod;
+      if (tickerFilter && tickerFilter.length) body.ticker_filter = tickerFilter;
+
+      try {
+        const resp = await fetch('/api/v1/query', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify(body),
+        });
+        const data = await resp.json();
+
+        if (!resp.ok) {
+          statusMsg.textContent = `Error ${resp.status}: ${data.message || data.error || 'Unknown error'}`;
+          btn.disabled = false;
+          return;
+        }
+
+        renderResults(data);
+        statusMsg.textContent = '';
+      } catch (err) {
+        statusMsg.textContent = `Network error: ${err.message}`;
+      } finally {
+        btn.disabled = false;
+      }
+    }
+
+    function renderResults(data) {
+      document.getElementById('results-section').style.display = '';
+      document.getElementById('truncated-banner').style.display = data.truncated ? '' : 'none';
+
+      const cacheBadge = data.cache_hit
+        ? '<span class="badge-cache">CACHE HIT</span>'
+        : '<span class="badge-live">LIVE</span>';
+      document.getElementById('results-meta').innerHTML =
+        `${cacheBadge} &nbsp; Generated at ${new Date(data.generated_at).toLocaleString()} &nbsp;|&nbsp; ${data.companies.length} result(s)`;
+
+      const tbody = document.getElementById('results-tbody');
+      tbody.innerHTML = '';
+
+      if (data.companies.length === 0) {
+        tbody.innerHTML = '<tr><td colspan="8" style="text-align:center;color:#9ca3af;">No results found.</td></tr>';
+      } else {
+        for (const c of data.companies) {
+          const [accNum, , pageStr] = c.cite.split('_page_');
+          const pageNum = pageStr || '';
+          const citeUrl = `https://www.sec.gov/cgi-bin/browse-edgar?action=getcompany&type=${encodeURIComponent(c.ticker)}&dateb=&owner=include&count=40`;
+          const citeLink = `<a href="${citeUrl}" target="_blank" title="Accession: ${accNum}, Page: ${pageNum}">${c.cite}</a>`;
+          tbody.innerHTML += `<tr>
+            <td>${c.name}</td>
+            <td>${c.ticker}</td>
+            <td>${c.metric_name}</td>
+            <td>${c.prior_value ?? '—'}</td>
+            <td>${c.current_value ?? '—'}</td>
+            <td>${c.change != null ? (c.change >= 0 ? '+' : '') + c.change.toFixed(4) : '—'}</td>
+            <td>${c.unit ?? '—'}</td>
+            <td>${citeLink}</td>
+          </tr>`;
+        }
+      }
+
+      const expDiv = document.getElementById('explanation');
+      expDiv.textContent = data.explanation ? `Note: ${data.explanation}` : '';
+    }
+
+    let _pollInterval = null;
+
+    async function triggerIngest() {
+      const ticker = document.getElementById('ingest-ticker').value.trim().toUpperCase();
+      if (!ticker) return;
+      const maxFilings = parseInt(document.getElementById('ingest-max').value) || 4;
+
+      const btn = document.getElementById('ingest-btn');
+      btn.disabled = true;
+      document.getElementById('ingest-result').innerHTML = 'Starting ingestion…';
+
+      try {
+        const resp = await fetch('/api/v1/ingest', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ ticker, max_filings: maxFilings }),
+        });
+        const data = await resp.json();
+
+        if (!resp.ok) {
+          document.getElementById('ingest-result').innerHTML = `Error: ${JSON.stringify(data)}`;
+          btn.disabled = false;
+          return;
+        }
+
+        pollIngestStatus(data.run_id);
+      } catch (err) {
+        document.getElementById('ingest-result').innerHTML = `Network error: ${err.message}`;
+        btn.disabled = false;
+      }
+    }
+
+    function pollIngestStatus(runId) {
+      if (_pollInterval) clearInterval(_pollInterval);
+      _pollInterval = setInterval(async () => {
+        try {
+          const resp = await fetch(`/api/v1/ingest/${runId}`);
+          const data = await resp.json();
+          document.getElementById('ingest-result').innerHTML =
+            `<pre>${JSON.stringify(data, null, 2)}</pre>`;
+
+          if (data.completed_at) {
+            clearInterval(_pollInterval);
+            document.getElementById('ingest-btn').disabled = false;
+          }
+        } catch (err) {
+          clearInterval(_pollInterval);
+          document.getElementById('ingest-btn').disabled = false;
+        }
+      }, 3000);
+    }
+  </script>
+</body>
+</html>
